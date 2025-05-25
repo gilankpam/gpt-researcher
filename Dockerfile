@@ -3,7 +3,7 @@ FROM python:3.11.4-slim-bullseye AS install-browser
 
 # Install Chromium, Chromedriver, Firefox, Geckodriver, and build tools in one layer
 RUN apt-get update \
-    && apt-get install -y gnupg wget ca-certificates --no-install-recommends \
+    && apt-get install -y gnupg wget ca-certificates curl --no-install-recommends \
     && wget -qO - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
@@ -30,6 +30,23 @@ COPY ./multi_agents/requirements.txt ./multi_agents/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir -r multi_agents/requirements.txt
 
+# Install frontend
+# Install Node.js from NodeSource following https://github.com/nodesource/distributions
+RUN mkdir /usr/src/app/frontend \
+    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /usr/src/frontend
+
+COPY ./frontend/nextjs/package.json ./
+
+RUN npm install
+
+COPY ./frontend/nextjs ./
+
+RUN npm run build && npm prune --production
+
 # Stage 3: Final stage with non-root user and app
 FROM gpt-researcher-install AS gpt-researcher
 
@@ -40,7 +57,7 @@ RUN useradd -ms /bin/bash gpt-researcher && \
     mkdir -p /usr/src/app/outputs && \
     chown -R gpt-researcher:gpt-researcher /usr/src/app/outputs && \
     chmod 777 /usr/src/app/outputs
-    
+
 USER gpt-researcher
 WORKDIR /usr/src/app
 
@@ -51,4 +68,5 @@ COPY --chown=gpt-researcher:gpt-researcher ./ ./
 EXPOSE 8000
 
 # Define the default command to run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+COPY ./conf/start_services.sh /usr/src/app/start_services.sh
+CMD ["/bin/bash", "/usr/src/app/start_services.sh"]
